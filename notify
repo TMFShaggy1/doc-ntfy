@@ -1,0 +1,59 @@
+name: DoC to ntfy
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:  # Lets you run it manually to test
+
+jobs:
+  check-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check SiftRSS and send to ntfy
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Download feed + cache last seen guid
+          mkdir -p ~/.cache
+          CACHE_FILE=~/.cache/doc_last_guid.txt
+          touch $CACHE_FILE
+          
+          # Fetch feed
+          curl -sL "$SIFTRSS_URL" > feed.xml
+          
+          # Get latest item guid + title + link
+          LATEST_GUID=$(grep -oPm1 "(?<=<guid>)[^<]+" feed.xml)
+          LATEST_TITLE=$(grep -oPm1 "(?<=<title>)[^<]+" feed.xml | sed -n '2p') # skip feed title
+          LATEST_LINK=$(grep -oPm1 "(?<=<link>)[^<]+" feed.xml | sed -n '2p')  # skip feed link
+          
+          # Check if new
+          LAST_GUID=$(cat $CACHE_FILE)
+          if [ "$LATEST_GUID" != "$LAST_GUID" ] && [ -n "$LATEST_GUID" ]; then
+            echo "New post: $LATEST_TITLE"
+            echo "$LATEST_GUID" > $CACHE_FILE
+            
+            # Send to ntfy
+            curl -d "$LATEST_TITLE" \
+              -H "Title: Doctor of Credit Alert" \
+              -H "Click: $LATEST_LINK" \
+              -H "Tags: credit_card,money" \
+              -H "Priority: 4" \
+              https://ntfy.sh/$NTFY_TOPIC
+          else
+            echo "No new posts"
+          fi
+          
+          # Save cache between runs
+          mkdir -p /tmp/cache
+          cp $CACHE_FILE /tmp/cache/ || true
+          
+      - name: Cache last guid
+        uses: actions/cache@v4
+        with:
+          path: /tmp/cache
+          key: doc-guid-cache-${{ github.run_id }}
+          restore-keys: |
+            doc-guid-cache-
