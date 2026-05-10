@@ -2,21 +2,6 @@ name: DoC to ntfy
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Every 5 minutes
-  workflow_dispatch:
-
-jobs:
-  check-feed:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check SiftRSS and send to ntfy
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
-        name: DoC to ntfy
-
-on:
-  schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
@@ -31,7 +16,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache
-          key: doc-feed-cache
+          key: doc-feed-cache-${{ github.run_id }}
+          restore-keys: |
+            doc-feed-cache-
 
       - name: Check SiftRSS and send to ntfy
         env:
@@ -46,7 +33,7 @@ jobs:
           # Download feed
           curl -sL "$SIFTRSS_URL" -o feed.xml
 
-          # FIXED: Added space after [
+          # Check if feed is valid
           if [ ! -s feed.xml ]; then
             echo "Feed download failed or empty"
             exit 1
@@ -82,17 +69,9 @@ jobs:
               -H "Click: $LATEST_LINK" \
               -H "Tags: moneybag" \
               -H "Priority: 4" \
-              https://ntfy.sh/$NTFY_TOPIC
+              "https://ntfy.sh/$NTFY_TOPIC"
             
             echo "Sent!"
           else
             echo "No new posts since last run ($LAST_GUID)"
           fi
-
-      - name: Cache last guid
-        uses: actions/cache@v4
-        with:
-          path: /tmp/cache
-          key: doc-guid-cache-v2
-          restore-keys: |
-            doc-guid-cache-v2
