@@ -2,8 +2,8 @@ name: DoC to ntfy
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes
-  workflow_dispatch:  # Lets you run it manually to test
+    - cron: '*/5 * * * *' # Every 5 minutes
+  workflow_dispatch:
 
 jobs:
   check-feed:
@@ -14,46 +14,58 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
-          
-          # Download feed + cache last seen guid
-          mkdir -p ~/.cache
-          CACHE_FILE=~/.cache/doc_last_guid.txt
+          set -e # Exit on error so we see real failures
+
+          # Install xml tools
+          sudo apt-get update && sudo apt-get install -y xmlstarlet
+
+          # Download feed
+          curl -sL "$SIFTRSS_URL" -o feed.xml
+
+          # Check feed actually downloaded
+          if [! -s feed.xml ]; then
+            echo "Feed download failed or empty"
+            exit 1
+          fi
+
+          # Parse latest item with xmlstarlet - way more reliable than grep
+          LATEST_GUID=$(xmlstarlet sel -t -v "/rss/channel/item[1]/guid" feed.xml || echo "")
+          LATEST_TITLE=$(xmlstarlet sel -t -v "/rss/channel/item[1]/title" feed.xml || echo "")
+          LATEST_LINK=$(xmlstarlet sel -t -v "/rss/channel/item[1]/link" feed.xml || echo "")
+
+          if [ -z "$LATEST_GUID" ]; then
+            echo "No items in feed yet. Exiting."
+            exit 0
+          fi
+
+          echo "Latest: $LATEST_TITLE"
+
+          # Restore last guid from cache
+          mkdir -p /tmp/cache
+          CACHE_FILE=/tmp/cache/doc_last_guid.txt
           touch $CACHE_FILE
-          
-          # Fetch feed
-          curl -sL "$SIFTRSS_URL" > feed.xml
-          
-          # Get latest item guid + title + link
-          LATEST_GUID=$(grep -oPm1 "(?<=<guid>)[^<]+" feed.xml)
-          LATEST_TITLE=$(grep -oPm1 "(?<=<title>)[^<]+" feed.xml | sed -n '2p') # skip feed title
-          LATEST_LINK=$(grep -oPm1 "(?<=<link>)[^<]+" feed.xml | sed -n '2p')  # skip feed link
-          
-          # Check if new
           LAST_GUID=$(cat $CACHE_FILE)
-          if [ "$LATEST_GUID" != "$LAST_GUID" ] && [ -n "$LATEST_GUID" ]; then
-            echo "New post: $LATEST_TITLE"
+
+          if [ "$LATEST_GUID"!= "$LAST_GUID" ]; then
+            echo "New post detected. Sending to ntfy..."
             echo "$LATEST_GUID" > $CACHE_FILE
-            
-            # Send to ntfy
-            curl -d "$LATEST_TITLE" \
-              -H "Title: Doctor of Credit Alert" \
+
+            curl -s -d "$LATEST_TITLE" \
+              -H "Title: Doctor of Credit" \
               -H "Click: $LATEST_LINK" \
-              -H "Tags: credit_card,money" \
+              -H "Tags: moneybag" \
               -H "Priority: 4" \
               https://ntfy.sh/$NTFY_TOPIC
+
+            echo "Sent!"
           else
-            echo "No new posts"
+            echo "No new posts since last run"
           fi
-          
-          # Save cache between runs
-          mkdir -p /tmp/cache
-          cp $CACHE_FILE /tmp/cache/ || true
-          
+
       - name: Cache last guid
         uses: actions/cache@v4
         with:
           path: /tmp/cache
-          key: doc-guid-cache-${{ github.run_id }}
+          key: doc-guid-cache-v2
           restore-keys: |
-            doc-guid-cache-
+            doc-guid-cache-v2
