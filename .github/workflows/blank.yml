@@ -24,7 +24,7 @@ jobs:
       - name: Check feed
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
+          SIFTRSS_URL: https://siftrss.com/f/odq838krvR
         run: |
           set -e
 
