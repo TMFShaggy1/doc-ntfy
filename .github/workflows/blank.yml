@@ -13,8 +13,32 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
+        name: DoC to ntfy
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore Cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: doc-feed-cache
+
+      - name: Check SiftRSS and send to ntfy
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SIFTRSS_URL: https://siftrss.com/f/dAwaVXrqLm
         run: |
-          set -e # Exit on error so we see real failures
+          set -e 
 
           # Install xml tools
           sudo apt-get update && sudo apt-get install -y xmlstarlet
@@ -22,13 +46,13 @@ jobs:
           # Download feed
           curl -sL "$SIFTRSS_URL" -o feed.xml
 
-          # Check feed actually downloaded
-          if [! -s feed.xml ]; then
+          # FIXED: Added space after [
+          if [ ! -s feed.xml ]; then
             echo "Feed download failed or empty"
             exit 1
           fi
 
-          # Parse latest item with xmlstarlet - way more reliable than grep
+          # Parse latest item
           LATEST_GUID=$(xmlstarlet sel -t -v "/rss/channel/item[1]/guid" feed.xml || echo "")
           LATEST_TITLE=$(xmlstarlet sel -t -v "/rss/channel/item[1]/title" feed.xml || echo "")
           LATEST_LINK=$(xmlstarlet sel -t -v "/rss/channel/item[1]/link" feed.xml || echo "")
@@ -38,28 +62,31 @@ jobs:
             exit 0
           fi
 
-          echo "Latest: $LATEST_TITLE"
+          echo "Latest found: $LATEST_TITLE"
 
-          # Restore last guid from cache
-          mkdir -p /tmp/cache
-          CACHE_FILE=/tmp/cache/doc_last_guid.txt
+          # Setup persistent cache directory
+          mkdir -p .cache
+          CACHE_FILE=".cache/doc_last_guid.txt"
           touch $CACHE_FILE
           LAST_GUID=$(cat $CACHE_FILE)
 
-          if [ "$LATEST_GUID"!= "$LAST_GUID" ]; then
+          if [ "$LATEST_GUID" != "$LAST_GUID" ]; then
             echo "New post detected. Sending to ntfy..."
+            
+            # Update cache file
             echo "$LATEST_GUID" > $CACHE_FILE
 
+            # Send to ntfy
             curl -s -d "$LATEST_TITLE" \
               -H "Title: Doctor of Credit" \
               -H "Click: $LATEST_LINK" \
               -H "Tags: moneybag" \
               -H "Priority: 4" \
               https://ntfy.sh/$NTFY_TOPIC
-
+            
             echo "Sent!"
           else
-            echo "No new posts since last run"
+            echo "No new posts since last run ($LAST_GUID)"
           fi
 
       - name: Cache last guid
